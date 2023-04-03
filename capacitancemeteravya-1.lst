@@ -1,0 +1,570 @@
+                  2   $LIST
+0000              4   
+0000              5   org 0000H
+0000 0203ED       6      ljmp MyProgram
+0003              7      
+0003              8   ; Timer/Counter 2 overflow interrupt vector
+002B              9   org 0x002B
+002B 0203D5      10            ljmp Timer2_ISR
+002E             11   
+002E             12   ; These register definitions needed by 'math32.inc'
+0030             13   DSEG at 30H
+0030             14   x:   ds 4
+0034             15   y:   ds 4
+0038             16   bcd: ds 5
+003D             17   T2ov: ds 2 ; 16-bit timer 2 overflow (to measure the period of very slow signals)
+003F             18   
+0000             19   BSEG
+0000             20   mf: dbit 1
+0001             21   
+                570   $LIST
+                 23   $LIST
+02C4             25   
+02C4             26   
+02C4             27   button1 equ p2.0
+02C4             28   button2 equ p2.1
+02C4             29   button3 equ p0.5
+02C4             30   button4 equ p0.2
+02C4             31   button5 equ p0.1
+02C4             32   button6 equ p4.5
+02C4             33   cseg
+02C4             34   ; These 'equ' must match the hardware wiring
+02C4             35   LCD_RS equ P3.2
+02C4             36   ;LCD_RW equ PX.X ; Not used in this code, connect the pin to GND
+02C4             37   LCD_E  equ P3.3
+02C4             38   LCD_D4 equ P3.4
+02C4             39   LCD_D5 equ P3.5
+02C4             40   LCD_D6 equ P3.6
+02C4             41   LCD_D7 equ P3.7
+02C4             42   
+                 44   	$LIST
+0370             46   
+0370             47   ;                     1234567890123456    <- This helps determine the location of the counter
+0370 43617061    48   Initial_Message:  db 'Capacitance (nF):   ', 0
+     63697461
+     6E636520
+     286E4629
+     3A202020
+     00
+0385 4E6F2073    49   No_Signal_Str:    db 'No signal      ', 0
+     69676E61
+     6C202020
+     20202000
+0395 2500        50   percent:    db '%', 0
+0397 45525200    51   message:    db 'ERR', 0
+039B             52   
+039B             53   ; Sends 10-digit BCD number in bcd to the LCD
+039B             54   Display_10_digit_BCD:
+039B C000        55            push ar0
+039D A83C        55            mov r0, bcd+4
+039F 12035A      55            lcall ?Display_BCD
+03A2 D000        55            pop ar0
+03A4 C000        56            push ar0
+03A6 A83B        56            mov r0, bcd+3
+03A8 12035A      56            lcall ?Display_BCD
+03AB D000        56            pop ar0
+03AD C000        57            push ar0
+03AF A83A        57            mov r0, bcd+2
+03B1 12035A      57            lcall ?Display_BCD
+03B4 D000        57            pop ar0
+03B6 C000        58            push ar0
+03B8 A839        58            mov r0, bcd+1
+03BA 12035A      58            lcall ?Display_BCD
+03BD D000        58            pop ar0
+03BF C000        59            push ar0
+03C1 A838        59            mov r0, bcd+0
+03C3 12035A      59            lcall ?Display_BCD
+03C6 D000        59            pop ar0
+03C8 22          60            ret
+03C9             61   
+03C9             62   ;Initializes timer/counter 2 as a 16-bit timer
+03C9             63   InitTimer2:
+03C9 75C800      64            mov T2CON, #0 ; Stop timer/counter.  Set as timer (clock input is pin 22.1184MHz).
+03CC             65            ; Set the reload value on overflow to zero (just in case is not zero)
+03CC 75CB00      66            mov RCAP2H, #0
+03CF 75CA00      67            mov RCAP2L, #0
+03D2 D2AD        68            setb ET2
+03D4 22          69       ret
+03D5             70   
+03D5             71   Timer2_ISR:
+03D5 C2CF        72            clr TF2  ; Timer 2 doesn't clear TF2 automatically. Do it in ISR
+03D7 C0E0        73            push acc
+03D9 053D        74            inc T2ov+0
+03DB E53D        75            mov a, T2ov+0
+03DD 7002        76            jnz Timer2_ISR_done
+03DF 053E        77            inc T2ov+1
+03E1             78   Timer2_ISR_done:
+03E1 D0E0        79            pop acc
+03E3 32          80            reti
+03E4             81   
+03E4             82   ;---------------------------------;
+03E4             83   ; Hardware initialization         ;
+03E4             84   ;---------------------------------;
+03E4             85   Initialize_All:
+03E4 1203C9      86       lcall InitTimer2
+03E7 12031E      87       lcall LCD_4BIT ; Initialize LCD
+03EA D2AF        88       setb EA
+03EC 22          89            ret
+03ED             90   
+03ED             91   ;---------------------------------;
+03ED             92   ; Main program loop               ;
+03ED             93   ;---------------------------------;
+03ED             94   MyProgram:
+03ED             95       ; Initialize the hardware:
+03ED 75817F      96       mov SP, #7FH
+03F0 1203E4      97       lcall Initialize_All
+03F3 D280        98       setb P0.0 ; Pin is used as input
+03F5             99   
+03F5 C0E0       100            push acc
+03F7 7401       100            mov a, #1
+03F9 14         100            dec a
+03FA 120355     100            lcall ?Set_Cursor_1 ; Select column and row
+03FD D0E0       100            pop acc
+03FF C083       101            push dph
+0401 C082       101            push dpl
+0403 C0E0       101            push acc
+0405 900370     101            mov dptr, #Initial_Message
+0408 120348     101            lcall ?Send_Constant_String
+040B D0E0       101            pop acc
+040D D082       101            pop dpl
+040F D083       101            pop dph
+0411            102       
+0411            103   forever:
+0411            104       ; synchronize with rising edge of the signal applied to pin P0.0
+0411 C2CA       105       clr TR2 ; Stop timer 2
+0413 75CC00     106       mov TL2, #0
+0416 75CD00     107       mov TH2, #0
+0419 753D00     108       mov T2ov+0, #0
+041C 753E00     109       mov T2ov+1, #0
+041F C2CF       110       clr TF2
+0421 D2CA       111       setb TR2
+0423            112   synch1:
+0423 E53E       113            mov a, T2ov+1
+0425 54FE       114            anl a, #0xfe
+0427 7034       115            jnz no_signal ; If the count is larger than 0x01ffffffff*45ns=1.16s, we assume there is no signal
+0429 2080F7     116       jb P0.0, synch1
+042C            117   synch2:    
+042C E53E       118            mov a, T2ov+1
+042E 54FE       119            anl a, #0xfe
+0430 702B       120            jnz no_signal
+0432 3080F7     121       jnb P0.0, synch2
+0435            122       
+0435            123       ; Measure the period of the signal applied to pin P0.0
+0435 C2CA       124       clr TR2
+0437 75CC00     125       mov TL2, #0
+043A 75CD00     126       mov TH2, #0
+043D 753D00     127       mov T2ov+0, #0
+0440 753E00     128       mov T2ov+1, #0
+0443 C2CF       129       clr TF2
+0445 D2CA       130       setb TR2 ; Start timer 2
+0447            131   measure1:
+0447 E53E       132            mov a, T2ov+1
+0449 54FE       133            anl a, #0xfe
+044B 7010       134            jnz no_signal 
+044D 2080F7     135       jb P0.0, measure1
+0450            136   measure2:    
+0450 E53E       137            mov a, T2ov+1
+0452 54FE       138            anl a, #0xfe
+0454 7007       139            jnz no_signal
+0456 3080F7     140       jnb P0.0, measure2
+0459 C2CA       141       clr TR2 ; Stop timer 2, [T2ov+1, T2ov+0, TH2, TL2] * 45.21123ns is the period
+045B            142   
+045B 801F       143            sjmp skip_this
+045D            144   no_signal:       
+045D C0E0       145            push acc
+045F 7401       145            mov a, #1
+0461 14         145            dec a
+0462 120353     145            lcall ?Set_Cursor_2 ; Select column and row
+0465 D0E0       145            pop acc
+0467 C083       146            push dph
+0469 C082       146            push dpl
+046B C0E0       146            push acc
+046D 900385     146            mov dptr, #No_Signal_Str
+0470 120348     146            lcall ?Send_Constant_String
+0473 D0E0       146            pop acc
+0475 D082       146            pop dpl
+0477 D083       146            pop dph
+0479 020411     147       ljmp forever ; Repeat! 
+047C            148   skip_this:
+047C            149   
+047C            150            ; Make sure [T2ov+1, T2ov+2, TH2, TL2]!=0
+047C E5CC       151            mov a, TL2
+047E 45CD       152            orl a, TH2
+0480 453D       153            orl a, T2ov+0
+0482 453E       154            orl a, T2ov+1
+0484 60D7       155            jz no_signal
+0486            156            ; Using integer math, convert the period to frequency:
+0486 85CC30     157            mov x+0, TL2
+0489 85CD31     158            mov x+1, TH2
+048C 853D32     159            mov x+2, T2ov+0
+048F 853E33     160            mov x+3, T2ov+1
+0492 75342D     161            mov y+0, #low (45 % 0x10000) 
+0495 753500     161            mov y+1, #high(45 % 0x10000) 
+0498 753600     161            mov y+2, #low (45 / 0x10000) 
+049B 753700     161            mov y+3, #high(45 / 0x10000)  ; One clock pulse is 1/22.1184MHz=45.21123ns
+049E 1201A8     162            lcall mul32
+04A1            163   
+04A1 753464     164            mov y+0, #low (100 % 0x10000) 
+04A4 753500     164            mov y+1, #high(100 % 0x10000) 
+04A7 753600     164            mov y+2, #low (100 / 0x10000) 
+04AA 753700     164            mov y+3, #high(100 / 0x10000) 
+04AD 120235     165            lcall div32
+04B0            166   
+04B0 753490     167            mov y+0, #low (144 % 0x10000) 
+04B3 753500     167            mov y+1, #high(144 % 0x10000) 
+04B6 753600     167            mov y+2, #low (144 / 0x10000) 
+04B9 753700     167            mov y+3, #high(144 / 0x10000) 
+04BC 1201A8     168            lcall mul32
+04BF            169            
+04BF 753464     170            mov y+0, #low (100 % 0x10000) 
+04C2 753500     170            mov y+1, #high(100 % 0x10000) 
+04C5 753600     170            mov y+2, #low (100 / 0x10000) 
+04C8 753700     170            mov y+3, #high(100 / 0x10000) 
+04CB 120235     171            lcall div32
+04CE            172            
+04CE 7534FC     173            mov y+0, #low (1020 % 0x10000) 
+04D1 753503     173            mov y+1, #high(1020 % 0x10000) 
+04D4 753600     173            mov y+2, #low (1020 / 0x10000) 
+04D7 753700     173            mov y+3, #high(1020 / 0x10000) 
+04DA 120235     174            lcall div32
+04DD            175   
+04DD 753464     176            mov y+0, #low (100 % 0x10000) 
+04E0 753500     176            mov y+1, #high(100 % 0x10000) 
+04E3 753600     176            mov y+2, #low (100 / 0x10000) 
+04E6 753700     176            mov y+3, #high(100 / 0x10000) 
+04E9 1201A8     177            lcall mul32
+04EC            178            
+04EC C0E0       179            push acc
+04EE 7401       179            mov a, #1
+04F0 14         179            dec a
+04F1 120353     179            lcall ?Set_Cursor_2 ; Select column and row
+04F4 D0E0       179            pop acc
+04F6 12002E     180            lcall hex2bcd
+04F9 12039B     181            lcall Display_10_digit_BCD
+04FC            182            
+04FC            183            one:
+04FC            184   ;        jb button1,two
+04FC            185   ;        Wait_Milli_Seconds(#50)         
+04FC            186   ;        jb button1, two  
+04FC 30A021     187            jnb button1, buttononecode
+04FF            188            
+04FF            189            two:
+04FF            190   ;        jb button2,three
+04FF            191   ;        Wait_Milli_Seconds(#50)         
+04FF            192   ;        jb button2,three  
+04FF 30A10C     193            jnb button2, jump2
+0502            194            
+0502            195            three:
+0502            196   ;        jb button3,four 
+0502            197   ;        Wait_Milli_Seconds(#50)         
+0502            198   ;        jb button3, four  
+0502 30850C     199            jnb button3, jump3
+0505            200            
+0505            201            four:
+0505            202   ;        jb button4,five 
+0505            203   ;        Wait_Milli_Seconds(#50)         
+0505            204   ;        jb button4, five  
+0505 30820C     205            jnb button4, jump4
+0508            206            
+0508            207            five:
+0508            208   ;        jb button5,six 
+0508            209   ;        Wait_Milli_Seconds(#50)         
+0508            210   ;        jb button5, six  
+0508 30810F     211            jnb button5, jump5
+050B            212            
+050B            213            six:
+050B            214   ;        jb button6,jump 
+050B            215   ;        Wait_Milli_Seconds(#50)         
+050B            216   ;        jb button6, jump  
+050B 30C50F     217            jnb button6, jump6
+050E            218            
+050E            219            jump2:
+050E 02058E     220            ljmp buttontwocode
+0511            221            
+0511            222            jump3:
+0511 0205FC     223            ljmp buttonthreecode
+0514            224            
+0514            225            jump4:
+0514 02066A     226            ljmp buttonfourcode
+0517            227            
+0517            228            jump:
+0517 020765     229            ljmp cont
+051A            230            
+051A            231            jump5:
+051A 0206D8     232            ljmp buttonfivecode
+051D            233            
+051D            234            jump6:
+051D 020746     235            ljmp buttonsixcode
+0520            236            
+0520            237            buttononecode:
+0520 12029E     238            lcall copy_xy
+0523 753064     239            mov x+0, #low (100 % 0x10000) 
+0526 753100     239            mov x+1, #high(100 % 0x10000) 
+0529 753200     239            mov x+2, #low (100 / 0x10000) 
+052C 753300     239            mov x+3, #high(100 / 0x10000)   
+052F 120114     240            lcall sub32
+0532            241            
+0532 753464     242            mov y+0, #low (100 % 0x10000) 
+0535 753500     242            mov y+1, #high(100 % 0x10000) 
+0538 753600     242            mov y+2, #low (100 / 0x10000) 
+053B 753700     242            mov y+3, #high(100 / 0x10000) 
+053E 1201A8     243            lcall mul32
+0541            244            
+0541 753464     245            mov y+0, #low (100 % 0x10000) 
+0544 753500     245            mov y+1, #high(100 % 0x10000) 
+0547 753600     245            mov y+2, #low (100 / 0x10000) 
+054A 753700     245            mov y+3, #high(100 / 0x10000) 
+054D 120235     246            lcall div32
+0550            247            
+0550 C0E0       248            push acc
+0552 740D       248            mov a, #13
+0554 14         248            dec a
+0555 120353     248            lcall ?Set_Cursor_2 ; Select column and row
+0558 D0E0       248            pop acc
+055A 12002E     249            lcall hex2bcd
+055D C000       250            push ar0
+055F A838       250            mov r0, BCD
+0561 12035A     250            lcall ?Display_BCD
+0564 D000       250            pop ar0
+0566 C0E0       251            push acc
+0568 740F       251            mov a, #15
+056A 14         251            dec a
+056B 120353     251            lcall ?Set_Cursor_2 ; Select column and row
+056E D0E0       251            pop acc
+0570 C083       252            push dph
+0572 C082       252            push dpl
+0574 C0E0       252            push acc
+0576 900395     252            mov dptr, #percent
+0579 120348     252            lcall ?Send_Constant_String
+057C D0E0       252            pop acc
+057E D082       252            pop dpl
+0580 D083       252            pop dph
+0582 C002       253            push AR2
+0584 7A64       253            mov R2, #100
+0586 1202CF     253            lcall ?Wait_Milli_Seconds
+0589 D002       253            pop AR2
+058B 020765     254            ljmp cont
+058E            255            
+058E            256            buttontwocode:
+058E 12029E     257            lcall copy_xy
+0591 753010     258            mov x+0, #low (10000 % 0x10000) 
+0594 753127     258            mov x+1, #high(10000 % 0x10000) 
+0597 753200     258            mov x+2, #low (10000 / 0x10000) 
+059A 753300     258            mov x+3, #high(10000 / 0x10000)         
+059D 120114     259            lcall sub32
+05A0            260            
+05A0 753464     261            mov y+0, #low (100 % 0x10000) 
+05A3 753500     261            mov y+1, #high(100 % 0x10000) 
+05A6 753600     261            mov y+2, #low (100 / 0x10000) 
+05A9 753700     261            mov y+3, #high(100 / 0x10000) 
+05AC 1201A8     262            lcall mul32
+05AF            263            
+05AF 753410     264            mov y+0, #low (10000 % 0x10000) 
+05B2 753527     264            mov y+1, #high(10000 % 0x10000) 
+05B5 753600     264            mov y+2, #low (10000 / 0x10000) 
+05B8 753700     264            mov y+3, #high(10000 / 0x10000) 
+05BB 120235     265            lcall div32
+05BE            266            
+05BE C0E0       267            push acc
+05C0 740D       267            mov a, #13
+05C2 14         267            dec a
+05C3 120353     267            lcall ?Set_Cursor_2 ; Select column and row
+05C6 D0E0       267            pop acc
+05C8 12002E     268            lcall hex2bcd
+05CB C000       269            push ar0
+05CD A838       269            mov r0, BCD
+05CF 12035A     269            lcall ?Display_BCD
+05D2 D000       269            pop ar0
+05D4 C0E0       270            push acc
+05D6 740F       270            mov a, #15
+05D8 14         270            dec a
+05D9 120353     270            lcall ?Set_Cursor_2 ; Select column and row
+05DC D0E0       270            pop acc
+05DE C083       271            push dph
+05E0 C082       271            push dpl
+05E2 C0E0       271            push acc
+05E4 900395     271            mov dptr, #percent
+05E7 120348     271            lcall ?Send_Constant_String
+05EA D0E0       271            pop acc
+05EC D082       271            pop dpl
+05EE D083       271            pop dph
+05F0 C002       272            push AR2
+05F2 7A64       272            mov R2, #100
+05F4 1202CF     272            lcall ?Wait_Milli_Seconds
+05F7 D002       272            pop AR2
+05F9 020765     273            ljmp cont
+05FC            274            
+05FC            275            
+05FC            276            buttonthreecode:
+05FC 12029E     277            lcall copy_xy
+05FF 7530A0     278            mov x+0, #low (100000 % 0x10000) 
+0602 753186     278            mov x+1, #high(100000 % 0x10000) 
+0605 753201     278            mov x+2, #low (100000 / 0x10000) 
+0608 753300     278            mov x+3, #high(100000 / 0x10000)        
+060B 120114     279            lcall sub32
+060E            280            
+060E 753464     281            mov y+0, #low (100 % 0x10000) 
+0611 753500     281            mov y+1, #high(100 % 0x10000) 
+0614 753600     281            mov y+2, #low (100 / 0x10000) 
+0617 753700     281            mov y+3, #high(100 / 0x10000) 
+061A 1201A8     282            lcall mul32
+061D            283            
+061D 7534A0     284            mov y+0, #low (100000 % 0x10000) 
+0620 753586     284            mov y+1, #high(100000 % 0x10000) 
+0623 753601     284            mov y+2, #low (100000 / 0x10000) 
+0626 753700     284            mov y+3, #high(100000 / 0x10000) 
+0629 120235     285            lcall div32
+062C            286            
+062C C0E0       287            push acc
+062E 740D       287            mov a, #13
+0630 14         287            dec a
+0631 120353     287            lcall ?Set_Cursor_2 ; Select column and row
+0634 D0E0       287            pop acc
+0636 12002E     288            lcall hex2bcd
+0639 C000       289            push ar0
+063B A838       289            mov r0, BCD
+063D 12035A     289            lcall ?Display_BCD
+0640 D000       289            pop ar0
+0642 C0E0       290            push acc
+0644 740F       290            mov a, #15
+0646 14         290            dec a
+0647 120353     290            lcall ?Set_Cursor_2 ; Select column and row
+064A D0E0       290            pop acc
+064C C083       291            push dph
+064E C082       291            push dpl
+0650 C0E0       291            push acc
+0652 900395     291            mov dptr, #percent
+0655 120348     291            lcall ?Send_Constant_String
+0658 D0E0       291            pop acc
+065A D082       291            pop dpl
+065C D083       291            pop dph
+065E C002       292            push AR2
+0660 7A64       292            mov R2, #100
+0662 1202CF     292            lcall ?Wait_Milli_Seconds
+0665 D002       292            pop AR2
+0667 020765     293            ljmp cont
+066A            294            
+066A            295            
+066A            296            buttonfourcode:
+066A 12029E     297            lcall copy_xy
+066D 753060     298            mov x+0, #low (220000 % 0x10000) 
+0670 75315B     298            mov x+1, #high(220000 % 0x10000) 
+0673 753203     298            mov x+2, #low (220000 / 0x10000) 
+0676 753300     298            mov x+3, #high(220000 / 0x10000)        
+0679 120114     299            lcall sub32
+067C            300            
+067C 753464     301            mov y+0, #low (100 % 0x10000) 
+067F 753500     301            mov y+1, #high(100 % 0x10000) 
+0682 753600     301            mov y+2, #low (100 / 0x10000) 
+0685 753700     301            mov y+3, #high(100 / 0x10000) 
+0688 1201A8     302            lcall mul32
+068B            303            
+068B 753460     304            mov y+0, #low (220000 % 0x10000) 
+068E 75355B     304            mov y+1, #high(220000 % 0x10000) 
+0691 753603     304            mov y+2, #low (220000 / 0x10000) 
+0694 753700     304            mov y+3, #high(220000 / 0x10000) 
+0697 120235     305            lcall div32
+069A            306            
+069A C0E0       307            push acc
+069C 740D       307            mov a, #13
+069E 14         307            dec a
+069F 120353     307            lcall ?Set_Cursor_2 ; Select column and row
+06A2 D0E0       307            pop acc
+06A4 12002E     308            lcall hex2bcd
+06A7 C000       309            push ar0
+06A9 A838       309            mov r0, BCD
+06AB 12035A     309            lcall ?Display_BCD
+06AE D000       309            pop ar0
+06B0 C0E0       310            push acc
+06B2 740F       310            mov a, #15
+06B4 14         310            dec a
+06B5 120353     310            lcall ?Set_Cursor_2 ; Select column and row
+06B8 D0E0       310            pop acc
+06BA C083       311            push dph
+06BC C082       311            push dpl
+06BE C0E0       311            push acc
+06C0 900395     311            mov dptr, #percent
+06C3 120348     311            lcall ?Send_Constant_String
+06C6 D0E0       311            pop acc
+06C8 D082       311            pop dpl
+06CA D083       311            pop dph
+06CC C002       312            push AR2
+06CE 7A64       312            mov R2, #100
+06D0 1202CF     312            lcall ?Wait_Milli_Seconds
+06D3 D002       312            pop AR2
+06D5 020765     313            ljmp cont
+06D8            314            
+06D8            315            
+06D8            316            buttonfivecode:
+06D8 12029E     317            lcall copy_xy
+06DB 753040     318            mov x+0, #low (1000000 % 0x10000) 
+06DE 753142     318            mov x+1, #high(1000000 % 0x10000) 
+06E1 75320F     318            mov x+2, #low (1000000 / 0x10000) 
+06E4 753300     318            mov x+3, #high(1000000 / 0x10000)       
+06E7 120114     319            lcall sub32
+06EA            320            
+06EA 753464     321            mov y+0, #low (100 % 0x10000) 
+06ED 753500     321            mov y+1, #high(100 % 0x10000) 
+06F0 753600     321            mov y+2, #low (100 / 0x10000) 
+06F3 753700     321            mov y+3, #high(100 / 0x10000) 
+06F6 1201A8     322            lcall mul32
+06F9            323            
+06F9 753440     324            mov y+0, #low (1000000 % 0x10000) 
+06FC 753542     324            mov y+1, #high(1000000 % 0x10000) 
+06FF 75360F     324            mov y+2, #low (1000000 / 0x10000) 
+0702 753700     324            mov y+3, #high(1000000 / 0x10000) 
+0705 120235     325            lcall div32
+0708            326            
+0708 C0E0       327            push acc
+070A 740D       327            mov a, #13
+070C 14         327            dec a
+070D 120353     327            lcall ?Set_Cursor_2 ; Select column and row
+0710 D0E0       327            pop acc
+0712 12002E     328            lcall hex2bcd
+0715 C000       329            push ar0
+0717 A838       329            mov r0, BCD
+0719 12035A     329            lcall ?Display_BCD
+071C D000       329            pop ar0
+071E C0E0       330            push acc
+0720 740F       330            mov a, #15
+0722 14         330            dec a
+0723 120353     330            lcall ?Set_Cursor_2 ; Select column and row
+0726 D0E0       330            pop acc
+0728 C083       331            push dph
+072A C082       331            push dpl
+072C C0E0       331            push acc
+072E 900395     331            mov dptr, #percent
+0731 120348     331            lcall ?Send_Constant_String
+0734 D0E0       331            pop acc
+0736 D082       331            pop dpl
+0738 D083       331            pop dph
+073A C002       332            push AR2
+073C 7A64       332            mov R2, #100
+073E 1202CF     332            lcall ?Wait_Milli_Seconds
+0741 D002       332            pop AR2
+0743 020765     333            ljmp cont
+0746            334            
+0746            335            buttonsixcode:
+0746 C0E0       336            push acc
+0748 740D       336            mov a, #13
+074A 14         336            dec a
+074B 120353     336            lcall ?Set_Cursor_2 ; Select column and row
+074E D0E0       336            pop acc
+0750 C083       337            push dph
+0752 C082       337            push dpl
+0754 C0E0       337            push acc
+0756 900397     337            mov dptr, #message
+0759 120348     337            lcall ?Send_Constant_String
+075C D0E0       337            pop acc
+075E D082       337            pop dpl
+0760 D083       337            pop dph
+0762            338   
+0762 020765     339            ljmp cont
+0765            340            
+0765            341            
+0765            342            cont:
+0765            343   
+0765 020411     344       ljmp forever ; Repeat! 
+0768            345       
+0768            346   
+0768            347   end
